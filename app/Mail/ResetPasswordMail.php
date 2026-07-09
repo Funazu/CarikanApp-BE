@@ -21,8 +21,7 @@ class ResetPasswordMail extends Mailable
     {
         $this->token = $token;
         $this->email = $email;
-        // Vite default dev port is 5173
-        $this->resetUrl = 'http://localhost:5173/reset-password?token=' . urlencode($token) . '&email=' . urlencode($email);
+        $this->resetUrl = rtrim(config('app.frontend_url'), '/') . '/reset-password?token=' . urlencode($token) . '&email=' . urlencode($email);
     }
 
     /**

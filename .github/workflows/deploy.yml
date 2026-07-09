@@ -1,0 +1,42 @@
+name: Deploy Laravel to Shared Hosting
+
+on:
+  push:
+    branches:
+      - main # Sesuaikan dengan branch yang kamu pakai untuk production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PORT }}
+          script: |
+            # Masuk ke direktori project Laravel kamu di hosting
+            cd /home/nadevco1/domains/CarikanApp-BE
+
+            # aktifkan sshkey coyyy
+            eval "$(ssh-agent -s)"
+            
+            ssh-add ~/.ssh/carikan_app_rsa
+            
+            # Tarik update terbaru
+            git pull origin main
+            
+            # Install dependencies baru (jika ada)
+            composer install --no-interaction --prefer-dist --optimize-autoloader
+            
+            # Jalankan migrasi database otomatis (hati-hati di production)
+            php artisan migrate --force
+            
+            # Bersihkan dan buat ulang cache
+            php artisan optimize:clear
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
