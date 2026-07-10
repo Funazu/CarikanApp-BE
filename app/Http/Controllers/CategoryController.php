@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Category;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Cache;
 
 class CategoryController extends Controller
 {
@@ -13,7 +14,9 @@ class CategoryController extends Controller
      */
     public function index()
     {
-        $categories = Category::all();
+        $categories = Cache::tags(['categories'])->remember('categories_all', 3600, function () {
+            return Category::all();
+        });
         return response()->json($categories, 200);
     }
 
@@ -36,6 +39,8 @@ class CategoryController extends Controller
 
         $category = Category::create($request->only(['name', 'description']));
 
+        Cache::tags(['categories'])->flush();
+
         return response()->json([
             'message' => 'Category created successfully',
             'category' => $category
@@ -47,7 +52,9 @@ class CategoryController extends Controller
      */
     public function show($id)
     {
-        $category = Category::find($id);
+        $category = Cache::tags(['categories'])->remember("category_show_{$id}", 3600, function () use ($id) {
+            return Category::find($id);
+        });
 
         if (!$category) {
             return response()->json(['message' => 'Category not found'], 404);
@@ -81,6 +88,8 @@ class CategoryController extends Controller
 
         $category->update($request->only(['name', 'description']));
 
+        Cache::tags(['categories', 'items'])->flush();
+
         return response()->json([
             'message' => 'Category updated successfully',
             'category' => $category
@@ -105,6 +114,8 @@ class CategoryController extends Controller
         }
 
         $category->delete();
+
+        Cache::tags(['categories', 'items'])->flush();
 
         return response()->json([
             'message' => 'Category deleted successfully'

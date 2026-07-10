@@ -7,8 +7,10 @@ use App\Models\Item;
 use App\Models\AuditLog;
 use App\Services\JwtService;
 use App\Services\MatchingService;
+use App\Services\ImageService;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Cache;
 
 class ItemController extends Controller
 {
@@ -45,72 +47,76 @@ class ItemController extends Controller
     public function index(Request $request)
     {
         $currentUser = $this->getOptionalUser($request);
-        $query = Item::query()->with(['category', 'location']);
+        $queryParams = $request->all();
+        $userId = $currentUser ? $currentUser->id : 'guest';
+        $cacheKey = 'items_index_' . md5(json_encode($queryParams) . '_' . $userId);
 
-        // Hide FOUND items with status IN_PROCESS from the public
-        // (i.e. users who are not owners and not admins)
-        if (!$currentUser || $currentUser->role !== 'ADMIN') {
-            $query->where(function ($q) use ($currentUser) {
-                $q->where('type', '!=', 'FOUND')
-                  ->orWhere('status', '!=', 'IN_PROCESS');
+        $itemsData = Cache::tags(['items'])->remember($cacheKey, 3600, function () use ($request, $currentUser) {
+            $query = Item::query()->with(['category', 'location']);
 
-                if ($currentUser) {
-                    $q->orWhere('user_id', $currentUser->id);
-                }
-            });
-        }
+            // Hide FOUND items with status IN_PROCESS from the public
+            // (i.e. users who are not owners and not admins)
+            if (!$currentUser || $currentUser->role !== 'ADMIN') {
+                $query->where(function ($q) use ($currentUser) {
+                    $q->where('type', '!=', 'FOUND')
+                      ->orWhere('status', '!=', 'IN_PROCESS');
 
-        // Search text in title or description
-        if ($request->filled('search')) {
-            $search = $request->input('search');
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%");
-            });
-        }
-
-        // Filtering
-        if ($request->filled('categoryId')) {
-            $query->where('category_id', $request->input('categoryId'));
-        }
-
-        if ($request->filled('locationId')) {
-            $query->where('location_id', $request->input('locationId'));
-        }
-
-        if ($request->filled('status')) {
-            $query->where('status', $request->input('status'));
-        }
-
-        if ($request->filled('type')) {
-            $query->where('type', $request->input('type'));
-        }
-
-        if ($request->filled('startDate') && $request->filled('endDate')) {
-            $query->whereBetween('event_time', [
-                $request->input('startDate') . ' 00:00:00',
-                $request->input('endDate') . ' 23:59:59'
-            ]);
-        }
-
-        // Pagination
-        $limit = $request->input('limit', 10);
-        $items = $query->paginate($limit);
-
-        // Hide secret feature from response for users who are not owners or admins
-        $currentUser = $this->getOptionalUser($request);
-
-        $items->getCollection()->transform(function ($item) use ($currentUser) {
-            $isOwner = $currentUser && $currentUser->id === $item->user_id;
-            $isAdmin = $currentUser && $currentUser->role === 'ADMIN';
-
-            if (!$isOwner && !$isAdmin) {
-                unset($item->secret_feature);
+                    if ($currentUser) {
+                        $q->orWhere('user_id', $currentUser->id);
+                    }
+                });
             }
-            return $item;
+
+            // Search text in title or description
+            if ($request->filled('search')) {
+                $search = $request->input('search');
+                $query->where(function ($q) use ($search) {
+                    $q->where('title', 'like', "%{$search}%")
+                      ->orWhere('description', 'like', "%{$search}%");
+                });
+            }
+
+            // Filtering
+            if ($request->filled('categoryId')) {
+                $query->where('category_id', $request->input('categoryId'));
+            }
+
+            // Filtering
+            if ($request->filled('locationId')) {
+                $query->where('location_id', $request->input('locationId'));
+            }
+
+            if ($request->filled('status')) {
+                $query->where('status', $request->input('status'));
+            }
+
+            if ($request->filled('type')) {
+                $query->where('type', $request->input('type'));
+            }
+
+            if ($request->filled('startDate') && $request->filled('endDate')) {
+                $query->whereBetween('event_time', [
+                    $request->input('startDate') . ' 00:00:00',
+                    $request->input('endDate') . ' 23:59:59'
+                ]);
+            }
+
+            // Pagination
+            $limit = $request->input('limit', 10);
+            return $query->paginate($limit)->toArray();
         });
 
-        return response()->json($items, 200);
+        // Hide secret feature from response for users who are not owners or admins
+        $isAdmin = $currentUser && $currentUser->role === 'ADMIN';
+
+        foreach ($itemsData['data'] as &$item) {
+            $isOwner = $currentUser && $currentUser->id === $item['user_id'];
+            if (!$isOwner && !$isAdmin) {
+                unset($item['secret_feature']);
+            }
+        }
+
+        return response()->json($itemsData, 200);
     }
 
     /**
@@ -122,7 +128,7 @@ class ItemController extends Controller
             'title' => 'required|string|max:255',
             'description' => 'required|string',
             'secret_feature' => 'required|string|max:255',
-            'image' => 'required|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'image' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
             'type' => 'required|in:LOST,FOUND',
             'event_time' => 'required|date',
             'contact_info' => 'required|string|max:100',
@@ -140,10 +146,9 @@ class ItemController extends Controller
 
         $user = auth()->user();
 
-        // Handle Image upload locally
+        // Handle Image upload locally, compressing to WebP
         $file = $request->file('image');
-        $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-        $file->move(public_path('uploads/items'), $filename);
+        $filename = ImageService::convertToWebp($file, 'uploads/items');
         $imageUrl = asset('uploads/items/' . $filename);
 
         $item = Item::create([
@@ -166,6 +171,8 @@ class ItemController extends Controller
             $this->matchingService->findMatchesForLostItem($item);
         }
 
+        Cache::tags(['items'])->flush();
+
         return response()->json([
             'message' => 'Report created successfully',
             'item' => $item
@@ -177,26 +184,29 @@ class ItemController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $item = Item::with(['category', 'location', 'user'])->find($id);
+        $itemArray = Cache::tags(['items'])->remember("item_show_{$id}", 3600, function () use ($id) {
+            $item = Item::with(['category', 'location', 'user'])->find($id);
+            return $item ? $item->toArray() : null;
+        });
 
-        if (!$item) {
+        if (!$itemArray) {
             return response()->json(['message' => 'Report not found'], 404);
         }
 
         $currentUser = $this->getOptionalUser($request);
-        $isOwner = $currentUser && $currentUser->id === $item->user_id;
+        $isOwner = $currentUser && $currentUser->id === $itemArray['user_id'];
         $isAdmin = $currentUser && $currentUser->role === 'ADMIN';
 
         // Hide FOUND items with status IN_PROCESS from the public
-        if ($item->type === 'FOUND' && $item->status === 'IN_PROCESS' && !$isOwner && !$isAdmin) {
+        if ($itemArray['type'] === 'FOUND' && $itemArray['status'] === 'IN_PROCESS' && !$isOwner && !$isAdmin) {
             return response()->json(['message' => 'Report not found'], 404);
         }
 
         if (!$isOwner && !$isAdmin) {
-            unset($item->secret_feature);
+            unset($itemArray['secret_feature']);
         }
 
-        return response()->json($item, 200);
+        return response()->json($itemArray, 200);
     }
 
     /**
@@ -222,7 +232,7 @@ class ItemController extends Controller
             'title' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'secret_feature' => 'nullable|string|max:255',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
             'status' => 'nullable|in:OPEN,IN_PROCESS,RETURNED',
             'event_time' => 'nullable|date',
             'contact_info' => 'nullable|string|max:100',
@@ -251,10 +261,9 @@ class ItemController extends Controller
         }
 
         if ($request->hasFile('image')) {
-            // Upload new image
+            // Upload new image, converting and compressing to WebP
             $file = $request->file('image');
-            $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('uploads/items'), $filename);
+            $filename = ImageService::convertToWebp($file, 'uploads/items');
             $data['image_url'] = asset('uploads/items/' . $filename);
         }
 
@@ -275,6 +284,8 @@ class ItemController extends Controller
                 $this->matchingService->findMatchesForFoundItem($item);
             }
         }
+
+        Cache::tags(['items'])->flush();
 
         return response()->json([
             'message' => 'Report updated successfully',
@@ -311,6 +322,8 @@ class ItemController extends Controller
         ]);
 
         $item->delete(); // Laravel soft delete
+
+        Cache::tags(['items'])->flush();
 
         return response()->json([
             'message' => 'Report soft-deleted successfully'

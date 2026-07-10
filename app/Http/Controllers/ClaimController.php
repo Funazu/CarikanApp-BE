@@ -7,6 +7,7 @@ use App\Models\Claim;
 use App\Models\Item;
 use App\Models\AuditLog;
 use App\Models\Notification;
+use App\Services\ImageService;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 
@@ -20,7 +21,7 @@ class ClaimController extends Controller
         $validator = Validator::make($request->all(), [
             'item_id' => 'required|exists:items,id',
             'proof_description' => 'required|string',
-            'proof_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'proof_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
         ]);
 
         if ($validator->fails()) {
@@ -61,8 +62,7 @@ class ClaimController extends Controller
         $proofImageUrl = null;
         if ($request->hasFile('proof_image')) {
             $file = $request->file('proof_image');
-            $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('uploads/claims'), $filename);
+            $filename = ImageService::convertToWebp($file, 'uploads/claims');
             $proofImageUrl = asset('uploads/claims/' . $filename);
         }
 
@@ -167,6 +167,8 @@ class ClaimController extends Controller
             // Update item status to RETURNED
             $item->status = 'RETURNED';
             $item->save();
+
+            \Illuminate\Support\Facades\Cache::tags(['items'])->flush();
 
             // Auto-reject other pending claims for this item
             Claim::where('item_id', $item->id)

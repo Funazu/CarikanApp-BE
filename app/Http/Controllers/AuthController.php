@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\User;
 use App\Services\JwtService;
+use App\Services\ImageService;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -184,7 +185,7 @@ class AuthController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'nullable|string|max:255',
             'contact_info' => 'nullable|string|max:20',
-            'avatar' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'avatar' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
         ]);
 
         if ($validator->fails()) {
@@ -203,10 +204,9 @@ class AuthController extends Controller
         }
 
         if ($request->hasFile('avatar')) {
-            // Store file locally inside public/uploads/avatars
+            // Store compressed WebP image locally inside public/uploads/avatars
             $file = $request->file('avatar');
-            $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('uploads/avatars'), $filename);
+            $filename = ImageService::convertToWebp($file, 'uploads/avatars');
             
             // Set URL
             $user->avatar_url = asset('uploads/avatars/' . $filename);
