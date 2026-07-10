@@ -60,4 +60,52 @@ class MatchingService
             }
         }
     }
+
+    /**
+     * Find matching LOST items for a newly approved FOUND item
+     */
+    public function findMatchesForFoundItem(Item $foundItem): void
+    {
+        if ($foundItem->type !== 'FOUND' || $foundItem->status !== 'OPEN') {
+            return;
+        }
+
+        // Search for LOST items in the same category and location within last 7 days
+        $matches = Item::where('type', 'LOST')
+            ->whereIn('status', ['OPEN', 'IN_PROCESS'])
+            ->where('category_id', $foundItem->category_id)
+            ->where('location_id', $foundItem->location_id)
+            ->where('created_at', '>=', now()->subDays(7))
+            ->get();
+
+        if ($matches->isEmpty()) {
+            return;
+        }
+
+        foreach ($matches as $lostItem) {
+            $lostUser = $lostItem->user;
+            $title = "Rekomendasi Temuan Barang!";
+            $message = "Kami menemukan barang yang mirip dengan laporan kehilangan Anda '{$lostItem->title}'! Seseorang telah menitipkan '{$foundItem->title}' di Pos Satpam.";
+
+            // 1. In-App Notification
+            Notification::create([
+                'user_id' => $lostUser->id,
+                'title' => $title,
+                'message' => $message,
+                'is_read' => false,
+            ]);
+
+            // 2. Email Blast (Mocked / Logged via Laravel Mail / Log)
+            Log::info("EMAIL SENT TO: {$lostUser->email} | TITLE: {$title} | BODY: {$message}");
+            
+            try {
+                Mail::raw($message, function ($mail) use ($lostUser, $title) {
+                    $mail->to($lostUser->email)
+                         ->subject($title);
+                });
+            } catch (\Exception $e) {
+                Log::warning("Failed sending email to {$lostUser->email}: " . $e->getMessage());
+            }
+        }
+    }
 }

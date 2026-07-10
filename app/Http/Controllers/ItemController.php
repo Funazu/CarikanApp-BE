@@ -44,7 +44,21 @@ class ItemController extends Controller
      */
     public function index(Request $request)
     {
+        $currentUser = $this->getOptionalUser($request);
         $query = Item::query()->with(['category', 'location']);
+
+        // Hide FOUND items with status IN_PROCESS from the public
+        // (i.e. users who are not owners and not admins)
+        if (!$currentUser || $currentUser->role !== 'ADMIN') {
+            $query->where(function ($q) use ($currentUser) {
+                $q->where('type', '!=', 'FOUND')
+                  ->orWhere('status', '!=', 'IN_PROCESS');
+
+                if ($currentUser) {
+                    $q->orWhere('user_id', $currentUser->id);
+                }
+            });
+        }
 
         // Search text in title or description
         if ($request->filled('search')) {
@@ -173,6 +187,11 @@ class ItemController extends Controller
         $isOwner = $currentUser && $currentUser->id === $item->user_id;
         $isAdmin = $currentUser && $currentUser->role === 'ADMIN';
 
+        // Hide FOUND items with status IN_PROCESS from the public
+        if ($item->type === 'FOUND' && $item->status === 'IN_PROCESS' && !$isOwner && !$isAdmin) {
+            return response()->json(['message' => 'Report not found'], 404);
+        }
+
         if (!$isOwner && !$isAdmin) {
             unset($item->secret_feature);
         }
@@ -250,6 +269,11 @@ class ItemController extends Controller
                 'old_value' => $oldStatus,
                 'new_value' => $item->status
             ]);
+
+            // If a FOUND item's status is changed to OPEN, trigger matching for it
+            if ($item->type === 'FOUND' && $item->status === 'OPEN') {
+                $this->matchingService->findMatchesForFoundItem($item);
+            }
         }
 
         return response()->json([
