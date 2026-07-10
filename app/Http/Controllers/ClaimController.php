@@ -168,7 +168,7 @@ class ClaimController extends Controller
             $item->status = 'RETURNED';
             $item->save();
 
-            \Illuminate\Support\Facades\Cache::tags(['items'])->flush();
+            \App\Services\CacheHelper::flush(['items']);
 
             // Auto-reject other pending claims for this item
             Claim::where('item_id', $item->id)

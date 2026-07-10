@@ -10,7 +10,7 @@ use App\Services\MatchingService;
 use App\Services\ImageService;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Cache;
+use App\Services\CacheHelper;
 
 class ItemController extends Controller
 {
@@ -51,7 +51,7 @@ class ItemController extends Controller
         $userId = $currentUser ? $currentUser->id : 'guest';
         $cacheKey = 'items_index_' . md5(json_encode($queryParams) . '_' . $userId);
 
-        $itemsData = Cache::tags(['items'])->remember($cacheKey, 3600, function () use ($request, $currentUser) {
+        $itemsData = CacheHelper::remember(['items'], $cacheKey, 3600, function () use ($request, $currentUser) {
             $query = Item::query()->with(['category', 'location']);
 
             // Hide FOUND items with status IN_PROCESS from the public
@@ -171,7 +171,7 @@ class ItemController extends Controller
             $this->matchingService->findMatchesForLostItem($item);
         }
 
-        Cache::tags(['items'])->flush();
+        CacheHelper::flush(['items']);
 
         return response()->json([
             'message' => 'Report created successfully',
@@ -184,7 +184,7 @@ class ItemController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $itemArray = Cache::tags(['items'])->remember("item_show_{$id}", 3600, function () use ($id) {
+        $itemArray = CacheHelper::remember(['items'], "item_show_{$id}", 3600, function () use ($id) {
             $item = Item::with(['category', 'location', 'user'])->find($id);
             return $item ? $item->toArray() : null;
         });
@@ -285,7 +285,7 @@ class ItemController extends Controller
             }
         }
 
-        Cache::tags(['items'])->flush();
+        CacheHelper::flush(['items']);
 
         return response()->json([
             'message' => 'Report updated successfully',
@@ -323,7 +323,7 @@ class ItemController extends Controller
 
         $item->delete(); // Laravel soft delete
 
-        Cache::tags(['items'])->flush();
+        CacheHelper::flush(['items']);
 
         return response()->json([
             'message' => 'Report soft-deleted successfully'

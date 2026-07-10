@@ -40,53 +40,62 @@ class RedisCachingTest extends TestCase
         return ['Authorization' => 'Bearer ' . $token];
     }
 
+    private function hasInCache(array $tags, string $key): bool
+    {
+        if (Cache::getStore() instanceof \Illuminate\Cache\TaggableStore) {
+            return Cache::tags($tags)->has($key);
+        }
+
+        return Cache::has($key);
+    }
+
     public function test_categories_endpoints_cache_and_invalidate(): void
     {
         // Create initial category
         $category = Category::create(['name' => 'Elektronik']);
 
         // Assert cache is empty initially
-        $this->assertFalse(Cache::tags(['categories'])->has('categories_all'));
+        $this->assertFalse($this->hasInCache(['categories'], 'categories_all'));
 
         // Request list -> should populate cache
         $response = $this->getJson('/api/categories');
         $response->assertStatus(200);
 
-        $this->assertTrue(Cache::tags(['categories'])->has('categories_all'));
+        $this->assertTrue($this->hasInCache(['categories'], 'categories_all'));
 
         // Request detail -> should populate cache
-        $this->assertFalse(Cache::tags(['categories'])->has("category_show_{$category->id}"));
+        $this->assertFalse($this->hasInCache(['categories'], "category_show_{$category->id}"));
         $response = $this->getJson('/api/categories/' . $category->id);
         $response->assertStatus(200);
 
-        $this->assertTrue(Cache::tags(['categories'])->has("category_show_{$category->id}"));
+        $this->assertTrue($this->hasInCache(['categories'], "category_show_{$category->id}"));
 
         // Create a new category -> should invalidate categories cache
         $this->postJson('/api/categories', [
             'name' => 'Pakaian',
         ], $this->getAuthHeader($this->admin));
 
-        $this->assertFalse(Cache::tags(['categories'])->has('categories_all'));
-        $this->assertFalse(Cache::tags(['categories'])->has("category_show_{$category->id}"));
+        $this->assertFalse($this->hasInCache(['categories'], 'categories_all'));
+        $this->assertFalse($this->hasInCache(['categories'], "category_show_{$category->id}"));
     }
 
     public function test_locations_endpoints_cache_and_invalidate(): void
     {
         $location = Location::create(['name' => 'Gedung 3']);
 
-        $this->assertFalse(Cache::tags(['locations'])->has('locations_all'));
+        $this->assertFalse($this->hasInCache(['locations'], 'locations_all'));
 
         $response = $this->getJson('/api/locations');
         $response->assertStatus(200);
 
-        $this->assertTrue(Cache::tags(['locations'])->has('locations_all'));
+        $this->assertTrue($this->hasInCache(['locations'], 'locations_all'));
 
         // Create new location -> should invalidate
         $this->postJson('/api/locations', [
             'name' => 'Gedung 2',
         ], $this->getAuthHeader($this->admin));
 
-        $this->assertFalse(Cache::tags(['locations'])->has('locations_all'));
+        $this->assertFalse($this->hasInCache(['locations'], 'locations_all'));
     }
 
     public function test_items_endpoints_cache_and_invalidate(): void
@@ -111,10 +120,10 @@ class RedisCachingTest extends TestCase
         $cacheKeyShow = "item_show_{$item->id}";
 
         // Request detail -> caches detail
-        $this->assertFalse(Cache::tags(['items'])->has($cacheKeyShow));
+        $this->assertFalse($this->hasInCache(['items'], $cacheKeyShow));
         $response = $this->getJson('/api/items/' . $item->id);
         $response->assertStatus(200);
-        $this->assertTrue(Cache::tags(['items'])->has($cacheKeyShow));
+        $this->assertTrue($this->hasInCache(['items'], $cacheKeyShow));
 
         // Create a new item -> flushes items tag cache
         $imageFile = \Illuminate\Http\UploadedFile::fake()->image('item.jpg');
@@ -130,6 +139,6 @@ class RedisCachingTest extends TestCase
             'location_id' => $location->id,
         ], $this->getAuthHeader($this->admin));
 
-        $this->assertFalse(Cache::tags(['items'])->has($cacheKeyShow));
+        $this->assertFalse($this->hasInCache(['items'], $cacheKeyShow));
     }
 }

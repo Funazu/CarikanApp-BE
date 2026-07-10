@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Location;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Cache;
+use App\Services\CacheHelper;
 
 class LocationController extends Controller
 {
@@ -14,7 +14,7 @@ class LocationController extends Controller
      */
     public function index()
     {
-        $locations = Cache::tags(['locations'])->remember('locations_all', 3600, function () {
+        $locations = CacheHelper::remember(['locations'], 'locations_all', 3600, function () {
             return Location::all();
         });
         return response()->json($locations, 200);
@@ -39,7 +39,7 @@ class LocationController extends Controller
 
         $location = Location::create($request->only(['name', 'description']));
 
-        Cache::tags(['locations'])->flush();
+        CacheHelper::flush(['locations']);
 
         return response()->json([
             'message' => 'Location created successfully',
@@ -52,7 +52,7 @@ class LocationController extends Controller
      */
     public function show($id)
     {
-        $location = Cache::tags(['locations'])->remember("location_show_{$id}", 3600, function () use ($id) {
+        $location = CacheHelper::remember(['locations'], "location_show_{$id}", 3600, function () use ($id) {
             return Location::find($id);
         });
 
@@ -88,7 +88,7 @@ class LocationController extends Controller
 
         $location->update($request->only(['name', 'description']));
 
-        Cache::tags(['locations', 'items'])->flush();
+        CacheHelper::flush(['locations', 'items']);
 
         return response()->json([
             'message' => 'Location updated successfully',
@@ -115,7 +115,7 @@ class LocationController extends Controller
 
         $location->delete();
 
-        Cache::tags(['locations', 'items'])->flush();
+        CacheHelper::flush(['locations', 'items']);
 
         return response()->json([
             'message' => 'Location deleted successfully'
