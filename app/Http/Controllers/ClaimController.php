@@ -41,6 +41,13 @@ class ClaimController extends Controller
             ], 400);
         }
 
+        // Cannot submit claims for LOST items
+        if ($item->type === 'LOST') {
+            return response()->json([
+                'message' => 'Laporan barang hilang tidak dapat diklaim. Silakan hubungi pelapor langsung melalui kontak yang tertera.'
+            ], 400);
+        }
+
         // Cannot claim own item
         if ($item->user_id === $currentUser->id) {
             return response()->json([

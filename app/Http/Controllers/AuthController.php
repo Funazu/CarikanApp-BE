@@ -127,6 +127,87 @@ class AuthController extends Controller
     }
 
     /**
+     * Authenticate via Google SSO ID Token
+     */
+    public function googleAuth(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'id_token' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation error',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $idToken = $request->input('id_token');
+
+        // Verify ID token with Google API endpoint
+        $googleUrl = 'https://oauth2.googleapis.com/tokeninfo?id_token=' . urlencode($idToken);
+        
+        try {
+            $context = stream_context_create([
+                'http' => ['timeout' => 10, 'ignore_errors' => true]
+            ]);
+            $response = @file_get_contents($googleUrl, false, $context);
+            if (!$response) {
+                return response()->json(['message' => 'Gagal memverifikasi token Google.'], 400);
+            }
+
+            $payload = json_decode($response, true);
+
+            if (isset($payload['error_description']) || !isset($payload['email'])) {
+                return response()->json(['message' => 'Token Google tidak valid atau telah kedaluwarsa.'], 401);
+            }
+
+            $email = strtolower($payload['email']);
+            $name = $payload['name'] ?? explode('@', $email)[0];
+            $picture = $payload['picture'] ?? null;
+
+            // Enforce Amikom Email Gate
+            if (!preg_match('/^.+@(students\.)?amikom\.ac\.id$/i', $email)) {
+                return response()->json([
+                    'message' => "Email Google Anda ({$email}) bukan email resmi Amikom. Login Google SSO dibatasi hanya untuk domain @students.amikom.ac.id atau @amikom.ac.id."
+                ], 422);
+            }
+
+            // Find or create user
+            $user = User::where('email', $email)->first();
+
+            if (!$user) {
+                $role = User::count() === 0 ? 'ADMIN' : 'USER';
+                $user = User::create([
+                    'name' => $name,
+                    'email' => $email,
+                    'password' => Hash::make(Str::random(24)),
+                    'avatar_url' => $picture,
+                    'role' => $role,
+                    'trust_score' => 10,
+                ]);
+            } else if ($picture && !$user->avatar_url) {
+                $user->avatar_url = $picture;
+                $user->save();
+            }
+
+            $accessToken = $this->jwtService->generateAccessToken($user);
+            $refreshToken = $this->jwtService->generateRefreshToken($user);
+
+            return response()->json([
+                'message' => 'Google authentication successful',
+                'access_token' => $accessToken,
+                'refresh_token' => $refreshToken,
+                'token_type' => 'Bearer',
+                'user' => $user
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Terjadi kesalahan sistem saat otentikasi Google: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Refresh access token.
      */
     public function refresh(Request $request)
