@@ -31,7 +31,7 @@ class UserSeeder extends Seeder
             ],
             [
                 'name' => 'Karina Titik',
-                'email' => 'karina@students.amikom.ac.id',
+                'email' => 'karinatitik@students.amikom.ac.id',
                 'password' => Hash::make('password123'),
                 'role' => 'USER',
                 'trust_score' => 30,

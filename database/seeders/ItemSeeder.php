@@ -13,9 +13,9 @@ class ItemSeeder extends Seeder
 {
     public function run(): void
     {
-        $fauzun = User::where('email', 'fauzun@students.amikom.ac.id')->first();
-        $karina = User::where('email', 'karina@students.amikom.ac.id')->first();
-        $dipta = User::where('email', 'dipta@students.amikom.ac.id')->first();
+        $fauzun = User::where('email', 'fauzunnaja@students.amikom.ac.id')->first();
+        $karina = User::where('email', 'karinatitik@students.amikom.ac.id')->first();
+        $dipta = User::where('email', 'diptarama@students.amikom.ac.id')->first();
         $pemilik = User::where('email', 'pemilik@students.amikom.ac.id')->first();
 
         $catElektronik = Category::where('name', 'Elektronik')->first();
