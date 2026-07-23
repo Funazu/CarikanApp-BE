@@ -41,4 +41,67 @@ class AdminDashboardController extends Controller
             ]
         ], 200);
     }
+
+    /**
+     * Get list of users with trust score and report counts (Admin only)
+     */
+    public function users(Request $request)
+    {
+        $query = \App\Models\User::withCount(['items', 'claims']);
+
+        if ($request->has('search') && $request->search) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'LIKE', "%{$search}%")
+                  ->orWhere('email', 'LIKE', "%{$search}%")
+                  ->orWhere('contact_info', 'LIKE', "%{$search}%");
+            });
+        }
+
+        if ($request->has('role') && in_array($request->role, ['ADMIN', 'USER'])) {
+            $query->where('role', $request->role);
+        }
+
+        $users = $query->orderBy('trust_score', 'desc')->get();
+
+        return response()->json($users, 200);
+    }
+
+    /**
+     * Update user trust score or role (Admin only)
+     */
+    public function updateUser(Request $request, $id)
+    {
+        $user = \App\Models\User::find($id);
+        if (!$user) {
+            return response()->json(['message' => 'User not found'], 404);
+        }
+
+        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
+            'trust_score' => 'nullable|integer|min:0',
+            'role' => 'nullable|in:ADMIN,USER',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation error',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        if ($request->has('trust_score')) {
+            $user->trust_score = (int) $request->trust_score;
+        }
+
+        if ($request->has('role')) {
+            $user->role = $request->role;
+        }
+
+        $user->save();
+
+        return response()->json([
+            'message' => 'User updated successfully',
+            'user' => $user
+        ], 200);
+    }
 }

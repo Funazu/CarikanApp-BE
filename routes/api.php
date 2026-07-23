@@ -67,5 +67,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::delete('/locations/{id}', [LocationController::class, 'destroy']);
 
         Route::get('/admin/dashboard/stats', [AdminDashboardController::class, 'stats']);
+        Route::get('/admin/users', [AdminDashboardController::class, 'users']);
+        Route::patch('/admin/users/{id}', [AdminDashboardController::class, 'updateUser']);
     });
 });
