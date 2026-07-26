@@ -23,6 +23,17 @@ class Handler extends ExceptionHandler
      */
     public function register(): void
     {
+        $this->renderable(function (\Illuminate\Http\Exceptions\ThrottleRequestsException $e, $request) {
+            if ($request->is('api/*') || $request->wantsJson()) {
+                $retryAfter = $e->getHeaders()['Retry-After'] ?? 60;
+                return response()->json([
+                    'message' => "Terlalu banyak permintaan! Demi stabilitas server, silakan tunggu {$retryAfter} detik sebelum mencoba lagi.",
+                    'retry_after_seconds' => (int) $retryAfter,
+                    'error_code' => 'TOO_MANY_REQUESTS'
+                ], 429, $e->getHeaders());
+            }
+        });
+
         $this->reportable(function (Throwable $e) {
             //
         });

@@ -38,6 +38,7 @@ Route::middleware(['jwt.auth'])->group(function () {
     // User Profile
     Route::get('/users/me', [AuthController::class, 'me']);
     Route::put('/users/me', [AuthController::class, 'updateProfile']);
+    Route::put('/users/change-password', [AuthController::class, 'changePassword']);
 
     // Report Actions
     Route::post('/items', [ItemController::class, 'store']);
