@@ -175,6 +175,20 @@ class ClaimController extends Controller
             $item->status = 'RETURNED';
             $item->save();
 
+            // Reward +5 Trust Score Points to Finder when claim is approved on a FOUND item
+            if ($oldItemStatus !== 'RETURNED' && $item->type === 'FOUND' && $item->user_id) {
+                $finder = \App\Models\User::find($item->user_id);
+                if ($finder) {
+                    $finder->increment('trust_score', 5);
+
+                    Notification::create([
+                        'user_id' => $finder->id,
+                        'title' => 'Poin Kejujuran Bertambah! (+5)',
+                        'message' => "Terima kasih atas kejujuran Anda! Barang temuan '{$item->title}' telah berhasil dikembalikan ke pemiliknya. Anda mendapatkan +5 Poin Kejujuran."
+                    ]);
+                }
+            }
+
             \App\Services\CacheHelper::flush(['items']);
 
             // Auto-reject other pending claims for this item

@@ -52,7 +52,7 @@ class ItemController extends Controller
         $cacheKey = 'items_index_' . md5(json_encode($queryParams) . '_' . $userId);
 
         $itemsData = CacheHelper::remember(['items'], $cacheKey, 3600, function () use ($request, $currentUser) {
-            $query = Item::query()->with(['category', 'location']);
+            $query = Item::query()->with(['user:id,name,email,contact_info,avatar_url', 'category', 'location']);
 
             // Hide FOUND items with status IN_PROCESS from the public
             // (i.e. users who are not owners and not admins)
@@ -101,6 +101,9 @@ class ItemController extends Controller
                 ]);
             }
 
+            // Ordering: Newest first
+            $query->latest();
+
             // Pagination
             $limit = $request->input('limit', 10);
             return $query->paginate($limit)->toArray();
@@ -127,7 +130,7 @@ class ItemController extends Controller
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
             'description' => 'required|string',
-            'secret_feature' => 'required|string|max:255',
+            'secret_feature' => ($request->type === 'FOUND' ? 'required|string|max:255' : 'nullable|string|max:255'),
             'image' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
             'type' => 'required|in:LOST,FOUND',
             'event_time' => 'required|date',
@@ -154,10 +157,10 @@ class ItemController extends Controller
         $item = Item::create([
             'title' => $request->title,
             'description' => $request->description,
-            'secret_feature' => $request->secret_feature,
+            'secret_feature' => $request->secret_feature ?: 'Tidak ada ciri khusus (Laporan Kehilangan)',
             'image_url' => $imageUrl,
             'type' => $request->type,
-            'status' => ($request->type === 'FOUND' && $user->role !== 'ADMIN') ? 'IN_PROCESS' : 'OPEN',
+            'status' => ($user->role !== 'ADMIN') ? 'IN_PROCESS' : 'OPEN',
             'event_time' => $request->event_time,
             'contact_info' => $request->contact_info,
             'storage_location' => $request->storage_location,
@@ -279,6 +282,31 @@ class ItemController extends Controller
                 'new_value' => $item->status
             ]);
 
+            // Reward +5 Trust Score Points to Finder when status changes to RETURNED
+            if ($oldStatus !== 'RETURNED' && $item->status === 'RETURNED' && $item->type === 'FOUND' && $item->user_id) {
+                $finder = \App\Models\User::find($item->user_id);
+                if ($finder) {
+                    $finder->increment('trust_score', 5);
+
+                    \App\Models\Notification::create([
+                        'user_id' => $finder->id,
+                        'title' => 'Poin Kejujuran Bertambah! (+5)',
+                        'message' => "Terima kasih atas kejujuran Anda! Barang temuan '{$item->title}' telah berhasil dikembalikan ke pemiliknya. Anda mendapatkan +5 Poin Kejujuran.",
+                        'is_read' => false
+                    ]);
+                }
+            }
+
+            // Notify owner when Satpam verifies physical reception of a LOST item (status changed OPEN -> IN_PROCESS)
+            if ($oldStatus === 'OPEN' && $item->status === 'IN_PROCESS' && $item->type === 'LOST' && $item->user_id) {
+                \App\Models\Notification::create([
+                    'user_id' => $item->user_id,
+                    'title' => 'Barang Kehilangan Anda Diverifikasi & Disimpan Satpam!',
+                    'message' => "Barang Anda '{$item->title}' telah diverifikasi fisik oleh Satpam dan disimpan di: " . ($item->storage_location ?: 'Pos Satpam') . ". Silakan temui Satpam untuk mengambil barang Anda!",
+                    'is_read' => false
+                ]);
+            }
+
             // If a FOUND item's status is changed to OPEN, trigger matching for it
             if ($item->type === 'FOUND' && $item->status === 'OPEN') {
                 $this->matchingService->findMatchesForFoundItem($item);
@@ -352,5 +380,68 @@ class ItemController extends Controller
         $logs = AuditLog::where('item_id', $id)->with('actor')->orderBy('created_at', 'desc')->get();
 
         return response()->json($logs, 200);
+    }
+
+    /**
+     * Report that a LOST item was found and handed to Satpam.
+     */
+    public function reportFound(Request $request, $id)
+    {
+        $item = Item::find($id);
+
+        if (!$item || $item->type !== 'LOST') {
+            return response()->json(['message' => 'Laporan barang kehilangan tidak ditemukan.'], 404);
+        }
+
+        if ($item->status !== 'OPEN') {
+            return response()->json(['message' => 'Laporan ini sedang diproses atau telah selesai dikembalikan.'], 400);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'storage_location' => 'required|string|max:255',
+            'note' => 'nullable|string|max:500',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $finder = auth()->user();
+
+        // Keep status OPEN when form is submitted by finder (will become IN_PROCESS after Satpam verifies)
+        $oldStatus = $item->status;
+        $item->storage_location = $request->storage_location;
+        $item->status = 'OPEN';
+        $item->save();
+
+        // Create Audit Log
+        AuditLog::create([
+            'item_id' => $item->id,
+            'actor_id' => $finder->id,
+            'action' => 'FOUND_REPORTED',
+            'old_value' => $oldStatus,
+            'new_value' => "Penemu: {$finder->name}. Diserahkan ke Satpam: {$request->storage_location}. Catatan: " . ($request->note ?: '-')
+        ]);
+
+        // Notify Admins / Satpam ONLY for physical verification
+        $admins = \App\Models\User::where('role', 'ADMIN')->get();
+        foreach ($admins as $admin) {
+            \App\Models\Notification::create([
+                'user_id' => $admin->id,
+                'title' => 'Penyerahan Barang Kehilangan ke Satpam',
+                'message' => "Mahasiswa {$finder->name} menginfokan telah menyerahkan barang '{$item->title}' ke {$request->storage_location}. Mohon verifikasi fisik dan ubah status ke IN_PROCESS.",
+                'is_read' => false
+            ]);
+        }
+
+        CacheHelper::flush(['items']);
+
+        return response()->json([
+            'message' => 'Laporan penemuan barang berhasil dikirim ke Satpam! Terima kasih atas kejujuran Anda.',
+            'item' => $item
+        ], 200);
     }
 }

@@ -45,6 +45,7 @@ Route::middleware(['jwt.auth'])->group(function () {
     Route::put('/items/{id}', [ItemController::class, 'update']);
     Route::delete('/items/{id}', [ItemController::class, 'destroy']);
     Route::get('/items/{id}/logs', [ItemController::class, 'logs']);
+    Route::post('/items/{id}/report-found', [ItemController::class, 'reportFound']);
 
     // Claim Actions
     Route::post('/claims', [ClaimController::class, 'store']);
