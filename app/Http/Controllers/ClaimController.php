@@ -21,7 +21,7 @@ class ClaimController extends Controller
         $validator = Validator::make($request->all(), [
             'item_id' => 'required|exists:items,id',
             'proof_description' => 'required|string',
-            'proof_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
+            'proof_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:10240',
         ]);
 
         if ($validator->fails()) {
